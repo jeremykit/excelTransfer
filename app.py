@@ -38,115 +38,156 @@ def preview_sheet():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+def _infer_types(item):
+    """Infer data_type/business_type/signal_type/collect_type when possible."""
+    sig = item.get('signal_type', '') or ''
+    alarm = item.get('alarm_type', '') or ''
+    remark = item.get('collect_type', '') or ''
+    normalized = sig.lower()
+
+    if ('analog' in normalized) or ('模拟' in sig):
+        if not item.get('signal_type'):
+            item['signal_type'] = 'Analog'
+        item['data_type'] = item.get('data_type') or 'DOUBLE'
+        item['business_type'] = item.get('business_type') or 'DIGITAL'
+    if any(k in normalized for k in ['on', 'off', 'switch']) or ('开关' in sig):
+        if not item.get('signal_type'):
+            item['signal_type'] = 'Switch'
+        item['data_type'] = item.get('data_type') or 'DOUBLE'
+        item['business_type'] = item.get('business_type') or 'STATE'
+    if alarm:
+        item['business_type'] = 'ALARM'
+    if remark and not item.get('collect_type'):
+        item['collect_type'] = remark
+
+
 @app.route('/api/transform', methods=['POST'])
 def transform():
     data = request.json
     sheet_name = data.get('sheet_name')
+    selected_sheets = data.get('selected_sheets') or []
     # header_row_index 是用户点击的那一行，数据从它下一行开始
     header_idx = int(data.get('header_row_index', 0))
     mapping = data.get('mapping')  # 现在的 mapping value 是列索引 (0, 1, 14...)
-    
+
     filepath = os.path.join(app.config['UPLOAD_FOLDER'], 'temp.xlsx')
-    
+
     try:
-        # 1. 即使有表头，我们也用 header=None 读，然后手动切片，这样最稳，完全通过 index 操作
-        df = pd.read_excel(filepath, sheet_name=sheet_name, header=None)
-        
-        # 数据从 header_idx + 1 开始
-        df_data = df.iloc[header_idx + 1:].copy()
+        xl = pd.ExcelFile(filepath)
+        sheets_to_use = selected_sheets or ([sheet_name] if sheet_name else xl.sheet_names)
 
-        # 准备原始数据展示
         raw_display = []
-
-        # 准备清洗后数据
         clean_rows = []
 
-        # 获取用户映射的列索引 (转为 int)
         idx_dev_name = int(mapping.get('device_group')) if mapping.get('device_group') is not None else None
         idx_point = int(mapping.get('point_name')) if mapping.get('point_name') is not None else None
 
-        # === 核心清洗逻辑 ===
-
-        # A. 空值填充 (Fill Down)
-        if idx_dev_name is not None:
-            df_data[idx_dev_name] = df_data[idx_dev_name].infer_objects(copy=False).ffill()
-
-        for _, row in df_data.iterrows():
-            if idx_point is not None and pd.isna(row[idx_point]):
+        for s_name in sheets_to_use:
+            df = pd.read_excel(filepath, sheet_name=s_name, header=None)
+            if header_idx >= len(df.index):
                 continue
+            df_data = df.iloc[header_idx + 1:].copy()
 
-            raw_item = {}
             if idx_dev_name is not None:
-                raw_item['dev'] = str(row[idx_dev_name]) if pd.notna(row[idx_dev_name]) else ''
-            if idx_point is not None:
-                raw_item['pt'] = str(row[idx_point]) if pd.notna(row[idx_point]) else ''
-            sig_idx = int(mapping.get('signal_type')) if mapping.get('signal_type') is not None else None
-            if sig_idx is not None:
-                raw_item['sig'] = str(row[sig_idx]) if pd.notna(row[sig_idx]) else ''
-            raw_display.append(raw_item)
+                df_data[idx_dev_name] = df_data[idx_dev_name].infer_objects(copy=False).ffill()
 
-            item = {
-                'device_group': raw_item.get('dev', ''),
-                'project_no': '',
-                'name_en': '',
-                'name_zh': '',
-                'alias': '',
-                'data_type': '',
-                'signal_type': '',
-                'business_type': '',
-                'alarm_type': '',
-                'status_enum': '',
-                'collect_type': '',
-                'related_point': '',
-                'range': '',
-                'unit': '',
-                'll': '',
-                'l': '',
-                'h': '',
-                'hh': ''
-            }
-
-            for std_key, col_idx_str in mapping.items():
-                if col_idx_str is None or col_idx_str == "":
+            for _, row in df_data.iterrows():
+                if idx_point is not None and pd.isna(row[idx_point]):
                     continue
-                col_idx = int(col_idx_str)
 
-                if std_key == 'point_name':
-                    val = str(row[col_idx]) if pd.notna(row[col_idx]) else ""
-                    if '\n' in val:
-                        parts = val.split('\n')
-                        item['name_en'] = parts[0].strip()
-                        item['name_zh'] = parts[1].strip() if len(parts) > 1 else ''
+                raw_item = {'sheet': s_name}
+                if idx_dev_name is not None:
+                    raw_item['dev'] = str(row[idx_dev_name]) if pd.notna(row[idx_dev_name]) else ''
+                if idx_point is not None:
+                    raw_item['pt'] = str(row[idx_point]) if pd.notna(row[idx_point]) else ''
+                sig_idx = int(mapping.get('signal_type')) if mapping.get('signal_type') is not None else None
+                if sig_idx is not None:
+                    raw_item['sig'] = str(row[sig_idx]) if pd.notna(row[sig_idx]) else ''
+                raw_display.append(raw_item)
+
+                item = {
+                    'group_name': s_name,
+                    'device_name': raw_item.get('dev', ''),
+                    'project_no': '',
+                    'standard_name': '',
+                    'name_en': '',
+                    'name_zh': '',
+                    'alias': '',
+                    'data_type': '',
+                    'signal_type': '',
+                    'business_type': '',
+                    'alarm_type': '',
+                    'status_enum': '',
+                    'collect_type': '',
+                    'related_point': '',
+                    'range': '',
+                    'unit': '',
+                    'll': '',
+                    'l': '',
+                    'h': '',
+                    'hh': ''
+                }
+
+                for std_key, col_idx_str in mapping.items():
+                    if col_idx_str is None or col_idx_str == "":
+                        continue
+                    col_idx = int(col_idx_str)
+
+                    if std_key == 'point_name':
+                        val = str(row[col_idx]) if pd.notna(row[col_idx]) else ""
+                        if '\n' in val:
+                            parts = val.split('\n')
+                            item['name_en'] = parts[0].strip()
+                            item['name_zh'] = parts[1].strip() if len(parts) > 1 else ''
+                        else:
+                            item['name_en'] = val
+                            item['name_zh'] = val
+                    elif std_key == 'device_group':
+                        item['device_name'] = str(row[col_idx]) if pd.notna(row[col_idx]) else ""
+                    elif std_key == 'item_no':
+                        item['project_no'] = str(row[col_idx]) if pd.notna(row[col_idx]) else ""
+                    elif std_key == 'signal_type':
+                        raw_sig = str(row[col_idx]) if pd.notna(row[col_idx]) else ""
+                        item['signal_type'] = raw_sig
+                    elif std_key == 'alarm_type':
+                        val = str(row[col_idx]) if pd.notna(row[col_idx]) else ""
+                        item['alarm_type'] = val
+                    elif std_key == 'remark':
+                        val = str(row[col_idx]) if pd.notna(row[col_idx]) else ""
+                        item['collect_type'] = val
                     else:
-                        item['name_en'] = val
-                        item['name_zh'] = val
-                elif std_key == 'device_group':
-                    item['device_group'] = str(row[col_idx]) if pd.notna(row[col_idx]) else ""
-                elif std_key == 'item_no':
-                    item['project_no'] = str(row[col_idx]) if pd.notna(row[col_idx]) else ""
-                elif std_key == 'signal_type':
-                    raw_sig = str(row[col_idx]) if pd.notna(row[col_idx]) else ""
-                    item['signal_type'] = raw_sig
-                    normalized = raw_sig.lower()
-                    if 'analog' in normalized or '模拟' in raw_sig:
-                        item['data_type'] = 'DOUBLE'
-                        item['business_type'] = 'DIGITAL'
-                    if 'on' in normalized or 'off' in normalized or 'switch' in normalized or '开关' in raw_sig:
-                        item['data_type'] = 'DOUBLE'
-                        item['business_type'] = 'STATE'
-                elif std_key == 'alarm_type':
-                    val = str(row[col_idx]) if pd.notna(row[col_idx]) else ""
-                    item['alarm_type'] = val
-                    if val:
-                        item['business_type'] = 'ALARM'
-                else:
-                    item[std_key] = str(row[col_idx]) if pd.notna(row[col_idx]) else ""
+                        item[std_key] = str(row[col_idx]) if pd.notna(row[col_idx]) else ""
 
-            clean_rows.append(item)
+                _infer_types(item)
+                clean_rows.append(item)
+
+        groups = []
+        devices = []
+        if clean_rows:
+            group_names = []
+            device_pairs = []
+            for r in clean_rows:
+                if r['group_name'] not in group_names:
+                    group_names.append(r['group_name'])
+                    groups.append({'name_en': r['group_name'], 'name_zh': r['group_name'], 'alias': ''})
+                pair = (r['device_name'], r['group_name'])
+                if pair not in device_pairs:
+                    device_pairs.append(pair)
+                    devices.append({
+                        'name_en': r['device_name'],
+                        'name_zh': r['device_name'],
+                        'alias': '',
+                        'category': '',
+                        'group_name': r['group_name'],
+                        'product_name': '',
+                        'ip_address': ''
+                    })
 
         return jsonify({
             'raw_data': raw_display,
-            'clean_data': clean_rows
+            'points': clean_rows,
+            'groups': groups,
+            'devices': devices
         })
 
     except Exception as e:
@@ -160,24 +201,79 @@ if __name__ == '__main__':
 @app.route('/api/export', methods=['POST'])
 def export_file():
     payload = request.json
-    rows = payload.get('rows', [])
+    points = payload.get('points', []) or payload.get('rows', [])
     ship_info = payload.get('ship_info', {})
+    groups_payload = payload.get('groups', [])
+    devices_payload = payload.get('devices', [])
 
-    if not rows:
+    if not points:
         return jsonify({'error': '没有可导出的数据'}), 400
 
-    df_points = pd.DataFrame(rows)
+    df_points = pd.DataFrame(points)
     if df_points.empty:
         return jsonify({'error': '数据为空'}), 400
 
-    df_points['group_name'] = df_points.get('group_name', '').replace('', '默认分组')
-    df_points['device_name'] = df_points.get('device_group', '').replace('', '未命名设备')
+    if 'group_name' not in df_points.columns:
+        df_points['group_name'] = '默认分组'
+    df_points['group_name'] = df_points['group_name'].replace('', '默认分组')
+    if 'device_name' not in df_points.columns:
+        df_points['device_name'] = df_points.get('device_group', '').replace('', '未命名设备')
+    df_points['device_name'] = df_points['device_name'].replace('', '未命名设备')
 
-    group_ids = {name: idx + 1 for idx, name in enumerate(df_points['group_name'].unique())}
-    device_ids = {name: idx + 1 for idx, name in enumerate(df_points['device_name'].unique())}
+    if groups_payload:
+        group_ids = {g.get('name_en') or g.get('name_zh'): idx + 1 for idx, g in enumerate(groups_payload)}
+        group_df = pd.DataFrame([
+            {
+                'ID': gid,
+                'name_en': g.get('name_en', ''),
+                'name_zh': g.get('name_zh', ''),
+                'alias': g.get('alias', '')
+            }
+            for g, gid in zip(groups_payload, group_ids.values())
+        ])
+    else:
+        group_ids = {name: idx + 1 for idx, name in enumerate(df_points['group_name'].unique())}
+        group_df = pd.DataFrame([
+            {
+                'ID': gid,
+                'name_en': name,
+                'name_zh': name,
+                'alias': ''
+            } for name, gid in group_ids.items()
+        ])
 
-    df_points['group_id'] = df_points['group_name'].map(group_ids)
-    df_points['device_id'] = df_points['device_name'].map(device_ids)
+    if devices_payload:
+        device_ids = {d.get('name_en') or d.get('name_zh'): idx + 1 for idx, d in enumerate(devices_payload)}
+        device_df = pd.DataFrame([
+            {
+                'id': did,
+                'name_en': d.get('name_en', ''),
+                'name_zh': d.get('name_zh', ''),
+                'alias': d.get('alias', ''),
+                '类别': d.get('category', ''),
+                'group_id': group_ids.get(d.get('group_name') or d.get('name_en'), 0),
+                'product_name': d.get('product_name', ''),
+                'IP地址': d.get('ip_address', '')
+            }
+            for d, did in zip(devices_payload, device_ids.values())
+        ])
+    else:
+        device_ids = {name: idx + 1 for idx, name in enumerate(df_points['device_name'].unique())}
+        device_df = pd.DataFrame([
+            {
+                'id': did,
+                'name_en': name,
+                'name_zh': name,
+                'alias': '',
+                '类别': '',
+                'group_id': df_points[df_points['device_name'] == name]['group_id'].iloc[0],
+                'product_name': '',
+                'IP地址': df_points[df_points['device_name'] == name]['ip_address'].iloc[0] if 'ip_address' in df_points.columns else ''
+            } for name, did in device_ids.items()
+        ])
+
+    df_points['group_id'] = df_points['group_name'].map(lambda x: group_ids.get(x, 0))
+    df_points['device_id'] = df_points['device_name'].map(lambda x: device_ids.get(x, 0))
 
     ship_df = pd.DataFrame([{
         '船只名称(Name)': ship_info.get('name', ''),
@@ -188,24 +284,6 @@ def export_file():
         'IMO编号': ship_info.get('imo', ''),
         'MMSI编号': ship_info.get('mmsi', '')
     }])
-
-    group_df = pd.DataFrame([{
-        'ID': gid,
-        'name_en': name,
-        'name_zh': name,
-        'alias': ''
-    } for name, gid in group_ids.items()])
-
-    device_df = pd.DataFrame([{
-        'id': did,
-        'name_en': name,
-        'name_zh': name,
-        'alias': '',
-        '类别': '',
-        'group_id': df_points[df_points['device_name'] == name]['group_id'].iloc[0],
-        'product_name': '',
-        'IP地址': df_points[df_points['device_name'] == name]['ip_address'].iloc[0] if 'ip_address' in df_points.columns else ''
-    } for name, did in device_ids.items()])
 
     point_columns = [
         '设备名', '项目编号', '标准名称', '检测点名称(EN)', '检测点名称(ZH/ITEM NAME)', '别名',
