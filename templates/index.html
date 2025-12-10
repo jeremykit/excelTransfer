@@ -14,13 +14,13 @@
     <div id="app" class="flex flex-col h-full">
         <header class="bg-white shadow px-6 py-4 z-10">
             <h1 class="text-xl font-bold text-gray-800">⛴️ 船舶点表交互式转换向导</h1>
-            <div class="flex mt-4 space-x-8 text-sm font-medium">
-                <div :class="step >= 1 ? 'text-blue-600' : 'text-gray-400'">1. 上传文件</div>
-                <div :class="step >= 2 ? 'text-blue-600' : 'text-gray-400'">2. 选择 Sheet & 表头</div>
-                <div :class="step >= 3 ? 'text-blue-600' : 'text-gray-400'">3. 建立映射</div>
-                <div :class="step >= 4 ? 'text-blue-600' : 'text-gray-400'">4. 预览&补全</div>
-            </div>
-        </header>
+                <div class="flex mt-4 space-x-8 text-sm font-medium">
+                    <div :class="step >= 1 ? 'text-blue-600' : 'text-gray-400'">1. 上传文件</div>
+                    <div :class="step >= 2 ? 'text-blue-600' : 'text-gray-400'">2. 选择 Sheet & 表头</div>
+                    <div :class="step >= 3 ? 'text-blue-600' : 'text-gray-400'">3. 建立映射</div>
+                    <div :class="step >= 4 ? 'text-blue-600' : 'text-gray-400'">4. 预览补全 · 导出</div>
+                </div>
+            </header>
 
         <main class="flex-1 overflow-hidden relative">
             <!-- Step 1: 上传 -->
@@ -32,11 +32,16 @@
 
             <!-- Step 2: 选择表头 -->
             <div v-if="step === 2" class="flex flex-col h-full p-6">
-                <div class="flex space-x-2 mb-4 overflow-x-auto pb-2">
-                    <button v-for="s in sheets" :key="s" @click="selectSheet(s)"
-                        :class="['px-4 py-2 rounded-lg text-sm', currentSheet === s ? 'bg-blue-600 text-white' : 'bg-white hover:bg-gray-100']">
-                        [[ s ]]
+                <div class="grid grid-cols-4 gap-2 mb-4">
+                    <button v-for="s in sheets" :key="s" @click="toggleSheet(s)"
+                        :class="['px-3 py-2 rounded-lg text-sm border flex items-center justify-between', selectedSheets.includes(s) ? 'bg-blue-600 text-white border-blue-500' : 'bg-white hover:bg-gray-100']">
+                        <span>[[ s ]]</span>
+                        <span class="text-xs" v-if="selectedSheets.includes(s)">✅</span>
                     </button>
+                </div>
+                <div class="flex items-center justify-between text-sm text-gray-600 mb-2">
+                    <div>预览当前 Sheet：<span class="font-mono text-blue-700">[[ previewSheet ]]</span></div>
+                    <div>（可点击行选定表头，映射将应用到已勾选的所有 Sheet）</div>
                 </div>
                 <div class="flex-1 overflow-auto bg-white rounded shadow border relative">
                     <table class="w-full">
@@ -57,8 +62,9 @@
                         </tbody>
                     </table>
                 </div>
-                <div class="mt-4 text-right">
-                    <button @click="confirmHeader" :disabled="headerRowIndex === null" class="bg-blue-600 text-white px-6 py-2 rounded">下一步</button>
+                <div class="mt-4 text-right flex justify-between items-center text-sm text-gray-600">
+                    <div>已选择 [[ selectedSheets.length ]] 个 Sheet</div>
+                    <button @click="confirmHeader" :disabled="headerRowIndex === null || selectedSheets.length===0" class="bg-blue-600 text-white px-6 py-2 rounded">下一步</button>
                 </div>
             </div>
 
@@ -81,8 +87,9 @@
                             </select>
                         </div>
                     </div>
-                    <div class="bg-gray-50 p-4 rounded text-sm text-gray-600">
+                    <div class="bg-gray-50 p-4 rounded text-sm text-gray-600 space-y-2">
                         <p>💡 绑定列索引以避免空表头冲突，确认后即可进行自动填充和拆分。</p>
+                        <p>🔁 备注/REMARKS 列映射后会直接写入采集类型。</p>
                     </div>
                 </div>
                 <div class="mt-4 text-right">
@@ -92,77 +99,165 @@
 
             <!-- Step 4: 预览/补全/导出 -->
             <div v-if="step === 4" class="flex flex-col h-full p-4 overflow-hidden gap-4">
-                <div class="grid grid-cols-3 gap-4">
-                    <div class="bg-white p-4 rounded shadow col-span-2">
-                        <h3 class="font-bold mb-2">船只信息</h3>
-                        <div class="grid grid-cols-3 gap-3 text-sm">
-                            <label class="flex flex-col">船只名称<input v-model="shipInfo.name" class="border rounded p-1"/></label>
-                            <label class="flex flex-col">船只编号<input v-model="shipInfo.hull" class="border rounded p-1"/></label>
-                            <label class="flex flex-col">船东<input v-model="shipInfo.owner" class="border rounded p-1"/></label>
-                            <label class="flex flex-col">项目编号<input v-model="shipInfo.project" class="border rounded p-1"/></label>
-                            <label class="flex flex-col">船级<input v-model="shipInfo.class" class="border rounded p-1"/></label>
-                            <label class="flex flex-col">IMO<input v-model="shipInfo.imo" class="border rounded p-1"/></label>
-                            <label class="flex flex-col">MMSI<input v-model="shipInfo.mmsi" class="border rounded p-1"/></label>
-                        </div>
+                <div class="flex items-center space-x-3 text-sm">
+                    <button v-for="(label, idx) in step4Flow" :key="idx" @click="step4Stage = idx+1"
+                        :class="['px-3 py-2 rounded-lg', step4Stage===idx+1 ? 'bg-blue-600 text-white' : 'bg-white border']">
+                        [[ idx+1 ]]. [[ label ]]
+                    </button>
+                </div>
+
+                <div v-if="step4Stage === 1" class="bg-white p-4 rounded shadow flex-1 overflow-auto">
+                    <div class="flex justify-between items-center mb-2">
+                        <h3 class="font-bold text-gray-700">船只信息</h3>
+                        <div class="text-xs text-gray-500">将写入说明 Sheet</div>
                     </div>
-                    <div class="bg-white p-4 rounded shadow">
-                        <h3 class="font-bold mb-2">批量赋值</h3>
-                        <div class="flex gap-2 text-sm">
-                            <select v-model="bulkField" class="border rounded p-1 flex-1">
-                                <option value="">选择列</option>
-                                <option value="collect_type">采集类型</option>
-                                <option value="business_type">业务类型</option>
-                                <option value="signal_type">信号类型</option>
-                            </select>
-                            <input v-model="bulkValue" class="border rounded p-1 flex-1" placeholder="填充值"/>
-                            <button class="bg-blue-600 text-white px-3 rounded" @click="applyBulk">应用</button>
-                        </div>
+                    <div class="grid grid-cols-3 gap-3 text-sm">
+                        <label class="flex flex-col">船只名称<input v-model="shipInfo.name" class="border rounded p-2"/></label>
+                        <label class="flex flex-col">船只编号<input v-model="shipInfo.hull" class="border rounded p-2"/></label>
+                        <label class="flex flex-col">船东<input v-model="shipInfo.owner" class="border rounded p-2"/></label>
+                        <label class="flex flex-col">项目编号<input v-model="shipInfo.project" class="border rounded p-2"/></label>
+                        <label class="flex flex-col">船级<input v-model="shipInfo.class" class="border rounded p-2"/></label>
+                        <label class="flex flex-col">IMO<input v-model="shipInfo.imo" class="border rounded p-2"/></label>
+                        <label class="flex flex-col">MMSI<input v-model="shipInfo.mmsi" class="border rounded p-2"/></label>
                     </div>
                 </div>
 
-                <div class="flex-1 overflow-hidden bg-white rounded shadow border">
-                    <div class="p-2 flex justify-between items-center bg-gray-50 border-b">
-                        <div class="font-bold text-gray-700">在线编辑</div>
-                        <div class="text-sm text-gray-500">可在导出前补充 IP、采集类型等缺失信息</div>
+                <div v-if="step4Stage === 2" class="bg-white p-4 rounded shadow flex-1 overflow-auto">
+                    <div class="flex justify-between items-center mb-2">
+                        <h3 class="font-bold text-gray-700">分组列表</h3>
+                        <div class="text-xs text-gray-500">来源：Sheet 名称，可修改别名</div>
                     </div>
-                    <div class="h-full overflow-auto">
-                        <table class="w-full text-xs">
-                            <thead class="sticky top-0 bg-gray-100">
-                                <tr>
-                                    <th class="p-2 border">设备组/名</th>
-                                    <th class="p-2 border">项目编号</th>
-                                    <th class="p-2 border">标准名称</th>
-                                    <th class="p-2 border">检测点EN</th>
-                                    <th class="p-2 border">检测点ZH</th>
-                                    <th class="p-2 border">信号类型</th>
-                                    <th class="p-2 border">业务类型</th>
-                                    <th class="p-2 border">采集类型</th>
-                                    <th class="p-2 border">范围</th>
-                                    <th class="p-2 border">单位</th>
-                                    <th class="p-2 border">IP</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <tr v-for="(row, idx) in transformResult.clean_data" :key="idx" class="border-b">
-                                    <td class="p-1 border"><input v-model="row.device_group" class="w-full border rounded p-1"/></td>
-                                    <td class="p-1 border"><input v-model="row.project_no" class="w-full border rounded p-1"/></td>
-                                    <td class="p-1 border"><input v-model="row.standard_name" class="w-full border rounded p-1"/></td>
-                                    <td class="p-1 border"><input v-model="row.name_en" class="w-full border rounded p-1"/></td>
-                                    <td class="p-1 border"><input v-model="row.name_zh" class="w-full border rounded p-1"/></td>
-                                    <td class="p-1 border"><input v-model="row.signal_type" class="w-full border rounded p-1"/></td>
-                                    <td class="p-1 border"><input v-model="row.business_type" class="w-full border rounded p-1"/></td>
-                                    <td class="p-1 border"><input v-model="row.collect_type" class="w-full border rounded p-1"/></td>
-                                    <td class="p-1 border"><input v-model="row.range" class="w-full border rounded p-1"/></td>
-                                    <td class="p-1 border"><input v-model="row.unit" class="w-full border rounded p-1"/></td>
-                                    <td class="p-1 border"><input v-model="row.ip_address" class="w-full border rounded p-1"/></td>
-                                </tr>
-                            </tbody>
-                        </table>
+                    <table class="w-full text-xs border">
+                        <thead class="bg-gray-100">
+                            <tr>
+                                <th class="p-2 border">分组英文</th>
+                                <th class="p-2 border">分组中文</th>
+                                <th class="p-2 border">别名</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr v-for="(g, idx) in groupList" :key="idx">
+                                <td class="p-1 border"><input v-model="g.name_en" class="w-full border rounded p-1"/></td>
+                                <td class="p-1 border"><input v-model="g.name_zh" class="w-full border rounded p-1"/></td>
+                                <td class="p-1 border"><input v-model="g.alias" class="w-full border rounded p-1"/></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <div v-if="step4Stage === 3" class="bg-white p-4 rounded shadow flex-1 overflow-auto">
+                    <div class="flex justify-between items-center mb-2">
+                        <h3 class="font-bold text-gray-700">设备列表</h3>
+                        <div class="text-xs text-gray-500">每台设备指定所属分组 & IP</div>
+                    </div>
+                    <table class="w-full text-xs border">
+                        <thead class="bg-gray-100">
+                            <tr>
+                                <th class="p-2 border">设备英文</th>
+                                <th class="p-2 border">设备中文</th>
+                                <th class="p-2 border">分组</th>
+                                <th class="p-2 border">别名</th>
+                                <th class="p-2 border">产品型号</th>
+                                <th class="p-2 border">类别</th>
+                                <th class="p-2 border">IP</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr v-for="(d, idx) in deviceList" :key="idx">
+                                <td class="p-1 border"><input v-model="d.name_en" class="w-full border rounded p-1"/></td>
+                                <td class="p-1 border"><input v-model="d.name_zh" class="w-full border rounded p-1"/></td>
+                                <td class="p-1 border">
+                                    <select v-model="d.group_name" class="w-full border rounded p-1">
+                                        <option v-for="g in groupList" :key="g.name_en" :value="g.name_en">[[ g.name_en ]]</option>
+                                    </select>
+                                </td>
+                                <td class="p-1 border"><input v-model="d.alias" class="w-full border rounded p-1"/></td>
+                                <td class="p-1 border"><input v-model="d.product_name" class="w-full border rounded p-1"/></td>
+                                <td class="p-1 border"><input v-model="d.category" class="w-full border rounded p-1"/></td>
+                                <td class="p-1 border"><input v-model="d.ip_address" class="w-full border rounded p-1"/></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <div v-if="step4Stage === 4" class="flex flex-col gap-3 flex-1 overflow-hidden">
+                    <div class="grid grid-cols-3 gap-3">
+                        <div class="bg-white p-4 rounded shadow">
+                            <h3 class="font-bold mb-2">批量赋值</h3>
+                            <div class="flex gap-2 text-sm">
+                                <select v-model="bulkField" class="border rounded p-1 flex-1">
+                                    <option value="">选择列</option>
+                                    <option value="collect_type">采集类型</option>
+                                    <option value="business_type">业务类型</option>
+                                    <option value="signal_type">信号类型</option>
+                                </select>
+                                <input v-model="bulkValue" class="border rounded p-1 flex-1" placeholder="填充值"/>
+                                <button class="bg-blue-600 text-white px-3 rounded" @click="applyBulk">应用</button>
+                            </div>
+                        </div>
+                        <div class="bg-white p-4 rounded shadow col-span-2 text-sm text-gray-600">
+                            已汇总 [[ pointList.length ]] 条测点（跨 [[ selectedSheets.length ]] 个 Sheet / [[ groupList.length ]] 个分组）。
+                        </div>
+                    </div>
+                    <div class="flex-1 overflow-hidden bg-white rounded shadow border">
+                        <div class="p-2 flex justify-between items-center bg-gray-50 border-b">
+                            <div class="font-bold text-gray-700">测点在线编辑</div>
+                            <div class="text-sm text-gray-500">信号类型/业务类型/采集类型已按规则预填，可继续调整</div>
+                        </div>
+                        <div class="h-full overflow-auto">
+                            <table class="w-full text-xs">
+                                <thead class="sticky top-0 bg-gray-100">
+                                    <tr>
+                                        <th class="p-2 border">分组</th>
+                                        <th class="p-2 border">设备名</th>
+                                        <th class="p-2 border">项目编号</th>
+                                        <th class="p-2 border">标准名称</th>
+                                        <th class="p-2 border">检测点EN</th>
+                                        <th class="p-2 border">检测点ZH</th>
+                                        <th class="p-2 border">信号类型</th>
+                                        <th class="p-2 border">业务类型</th>
+                                        <th class="p-2 border">采集类型</th>
+                                        <th class="p-2 border">范围</th>
+                                        <th class="p-2 border">单位</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr v-for="(row, idx) in pointList" :key="idx" class="border-b">
+                                        <td class="p-1 border"><input v-model="row.group_name" class="w-full border rounded p-1"/></td>
+                                        <td class="p-1 border"><input v-model="row.device_name" class="w-full border rounded p-1"/></td>
+                                        <td class="p-1 border"><input v-model="row.project_no" class="w-full border rounded p-1"/></td>
+                                        <td class="p-1 border"><input v-model="row.standard_name" class="w-full border rounded p-1"/></td>
+                                        <td class="p-1 border"><input v-model="row.name_en" class="w-full border rounded p-1"/></td>
+                                        <td class="p-1 border"><input v-model="row.name_zh" class="w-full border rounded p-1"/></td>
+                                        <td class="p-1 border">
+                                            <select v-model="row.signal_type" class="w-full border rounded p-1">
+                                                <option value="">--</option>
+                                                <option v-for="s in signalOptions" :key="s" :value="s">[[ s ]]</option>
+                                            </select>
+                                        </td>
+                                        <td class="p-1 border">
+                                            <select v-model="row.business_type" class="w-full border rounded p-1">
+                                                <option value="">--</option>
+                                                <option v-for="b in businessOptions" :key="b" :value="b">[[ b ]]</option>
+                                            </select>
+                                        </td>
+                                        <td class="p-1 border">
+                                            <select v-model="row.collect_type" class="w-full border rounded p-1">
+                                                <option value="">--</option>
+                                                <option v-for="c in collectOptions" :key="c" :value="c">[[ c ]]</option>
+                                            </select>
+                                        </td>
+                                        <td class="p-1 border"><input v-model="row.range" class="w-full border rounded p-1"/></td>
+                                        <td class="p-1 border"><input v-model="row.unit" class="w-full border rounded p-1"/></td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
                     </div>
                 </div>
 
                 <div class="flex justify-between items-center">
-                    <div class="text-sm text-gray-600">共 [[ transformResult.clean_data.length ]] 条记录。</div>
+                    <div class="text-sm text-gray-600">共 [[ pointList.length ]] 条记录。</div>
                     <div class="space-x-3">
                         <button class="bg-gray-500 text-white px-4 py-2 rounded" @click="step=2">返回</button>
                         <button class="bg-green-600 text-white px-4 py-2 rounded" @click="exportExcel">导出标准点表</button>
@@ -181,6 +276,8 @@
                     step: 1,
                     sheets: [],
                     currentSheet: '',
+                    selectedSheets: [],
+                    previewSheet: '',
                     rawPreviewRows: [],
                     maxCols: 0,
                     headerRowIndex: null,
@@ -193,16 +290,25 @@
                         signal_type: '信号类型',
                         range: '量程',
                         unit: '单位',
-                        alarm_type: '极限报警/ALARM'
+                        alarm_type: '极限报警/ALARM',
+                        remark: '备注/REMARKS -> 采集类型'
                     },
                     mapping: {
                         device_group: null, point_name: null, item_no: null,
-                        signal_type: null, range: null, unit: null, alarm_type: null
+                        signal_type: null, range: null, unit: null, alarm_type: null, remark: null
                     },
-                    transformResult: { raw_data: [], clean_data: [] },
+                    transformResult: { raw_data: [], points: [], groups: [], devices: [] },
+                    groupList: [],
+                    deviceList: [],
+                    pointList: [],
                     shipInfo: { name: '', hull: '', owner: '', project: '', class: '', imo: '', mmsi: '' },
                     bulkField: '',
-                    bulkValue: ''
+                    bulkValue: '',
+                    step4Stage: 1,
+                    step4Flow: ['船只信息', '分组列表', '设备列表', '测点信息'],
+                    signalOptions: ['Analog', 'Switch'],
+                    businessOptions: ['DIGITAL', 'STATE', 'ALARM'],
+                    collectOptions: ['Modbus', 'OPC', 'IO', 'CAN', 'NMEA']
                 }
             },
             methods: {
@@ -217,12 +323,25 @@
                     const fd = new FormData(); fd.append('file', file);
                     const res = await fetch('/api/upload', { method: 'POST', body: fd });
                     const data = await res.json();
-                    if (data.sheets) { this.sheets = data.sheets; this.step = 2; this.selectSheet(this.sheets[0]); }
+                    if (data.sheets) {
+                        this.sheets = data.sheets;
+                        this.selectedSheets = [...data.sheets];
+                        this.step = 2;
+                        this.selectSheet(this.sheets[0]);
+                    }
                 },
                 async selectSheet(s) {
-                    this.currentSheet = s; this.headerRowIndex = null;
+                    this.currentSheet = s; this.previewSheet = s; this.headerRowIndex = null;
                     const res = await fetch('/api/preview_sheet', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ sheet_name: s }) });
                     const data = await res.json(); this.rawPreviewRows = data.rows; this.maxCols = data.col_count;
+                },
+                toggleSheet(s) {
+                    if (this.selectedSheets.includes(s)) {
+                        this.selectedSheets = this.selectedSheets.filter(i => i !== s);
+                    } else {
+                        this.selectedSheets.push(s);
+                    }
+                    this.selectSheet(s);
                 },
                 selectHeaderRow(i) { this.headerRowIndex = i; },
                 confirmHeader() {
@@ -256,24 +375,29 @@
                         if (txt.toLowerCase().includes('alarm')) this.mapping.alarm_type = opt.colIndex;
                         if (txt.includes('范围') || txt.includes('RANGE')) this.mapping.range = opt.colIndex;
                         if (txt.includes('单位') || txt.includes('UNIT')) this.mapping.unit = opt.colIndex;
+                        if (txt.toLowerCase().includes('remark')) this.mapping.remark = opt.colIndex;
                     });
                 },
                 async startTransform() {
                     const res = await fetch('/api/transform', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({
-                        sheet_name: this.currentSheet, header_row_index: this.headerRowIndex, mapping: this.mapping
+                        sheet_name: this.currentSheet, header_row_index: this.headerRowIndex, mapping: this.mapping, selected_sheets: this.selectedSheets
                     })});
                     const data = await res.json();
                     this.transformResult = data;
+                    this.groupList = data.groups || [];
+                    this.deviceList = data.devices || [];
+                    this.pointList = data.points || [];
+                    this.step4Stage = 1;
                     this.step = 4;
                 },
                 applyBulk() {
                     if (!this.bulkField || !this.bulkValue) return;
-                    this.transformResult.clean_data.forEach(r => r[this.bulkField] = this.bulkValue);
+                    this.pointList.forEach(r => r[this.bulkField] = this.bulkValue);
                 },
                 async exportExcel() {
                     const res = await fetch('/api/export', {
                         method: 'POST', headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({ rows: this.transformResult.clean_data, ship_info: this.shipInfo })
+                        body: JSON.stringify({ points: this.pointList, ship_info: this.shipInfo, groups: this.groupList, devices: this.deviceList })
                     });
                     if (res.ok) {
                         const blob = await res.blob();
