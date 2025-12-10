@@ -33,11 +33,19 @@
             <!-- Step 2: 选择表头 -->
             <div v-if="step === 2" class="flex flex-col h-full p-6">
                 <div class="grid grid-cols-4 gap-2 mb-4">
-                    <button v-for="s in sheets" :key="s" @click="toggleSheet(s)"
-                        :class="['px-3 py-2 rounded-lg text-sm border flex items-center justify-between', selectedSheets.includes(s) ? 'bg-blue-600 text-white border-blue-500' : 'bg-white hover:bg-gray-100']">
-                        <span>[[ s ]]</span>
-                        <span class="text-xs" v-if="selectedSheets.includes(s)">✅</span>
-                    </button>
+                    <div v-for="s in sheets" :key="s"
+                        :class="['px-3 py-2 rounded-lg text-sm border flex items-center justify-between cursor-pointer', previewSheet === s ? 'ring-2 ring-blue-400' : '']"
+                        @click="selectSheet(s)">
+                        <div class="flex items-center space-x-2">
+                            <input type="checkbox" :value="s" v-model="selectedSheets" @click.stop class="h-4 w-4 text-blue-600 border-gray-300 rounded"/>
+                            <span>[[ s ]]</span>
+                        </div>
+                        <span class="text-xs" v-if="selectedSheets.includes(s)">已选</span>
+                    </div>
+                </div>
+                <div class="flex items-center justify-between text-sm text-gray-600 mb-2">
+                    <div>预览当前 Sheet：<span class="font-mono text-blue-700">[[ previewSheet ]]</span></div>
+                    <div>（可点击行选定表头，映射将应用到已勾选的所有 Sheet）</div>
                 </div>
                 <div class="flex items-center justify-between text-sm text-gray-600 mb-2">
                     <div>预览当前 Sheet：<span class="font-mono text-blue-700">[[ previewSheet ]]</span></div>
@@ -344,12 +352,12 @@
                     const data = await res.json(); this.rawPreviewRows = data.rows; this.maxCols = data.col_count;
                 },
                 toggleSheet(s) {
+                    // 保留兼容性：仅用于手动切换复选框时调用
                     if (this.selectedSheets.includes(s)) {
                         this.selectedSheets = this.selectedSheets.filter(i => i !== s);
                     } else {
                         this.selectedSheets.push(s);
                     }
-                    this.selectSheet(s);
                 },
                 selectHeaderRow(i) { this.headerRowIndex = i; },
                 confirmHeader() {
@@ -387,6 +395,10 @@
                     });
                 },
                 async startTransform() {
+                    if (!this.selectedSheets.length) {
+                        alert('请至少勾选 1 个需要处理的 Sheet/分组');
+                        return;
+                    }
                     const res = await fetch('/api/transform', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({
                         sheet_name: this.currentSheet, header_row_index: this.headerRowIndex, mapping: this.mapping, selected_sheets: this.selectedSheets
                     })});
