@@ -7,7 +7,7 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
     <style>
-        .table-cell { @apply border px-2 py-1 text-xs whitespace-nowrap overflow-hidden text-ellipsis max-w-[150px]; }
+        .table-cell { @apply border border-gray-200 px-2 py-1 text-xs whitespace-nowrap overflow-hidden text-ellipsis max-w-[150px]; }
     </style>
 </head>
 <body class="bg-gray-50 h-screen flex flex-col">
@@ -44,7 +44,7 @@
                     <div>（可点击行选定表头，映射将应用到已勾选的所有 Sheet）</div>
                 </div>
                 <div class="flex-1 overflow-auto bg-white rounded shadow border relative">
-                    <table class="w-full">
+                    <table class="w-full border border-gray-300">
                         <thead class="sticky top-0 bg-gray-200 z-20">
                             <tr>
                                 <th class="w-10 text-xs p-1 border">#</th>
@@ -112,7 +112,7 @@
                         <div class="text-xs text-gray-500">将写入说明 Sheet</div>
                     </div>
                     <div class="grid grid-cols-3 gap-3 text-sm">
-                        <label class="flex flex-col">船只名称<input v-model="shipInfo.name" class="border rounded p-2"/></label>
+                        <label class="flex flex-col">船只名称（必填）<input v-model="shipInfo.name" :class="['border rounded p-2', shipInfo.name ? '' : 'border-red-400']"/></label>
                         <label class="flex flex-col">船只编号<input v-model="shipInfo.hull" class="border rounded p-2"/></label>
                         <label class="flex flex-col">船东<input v-model="shipInfo.owner" class="border rounded p-2"/></label>
                         <label class="flex flex-col">项目编号<input v-model="shipInfo.project" class="border rounded p-2"/></label>
@@ -208,6 +208,9 @@
                             <table class="w-full text-xs">
                                 <thead class="sticky top-0 bg-gray-100">
                                     <tr>
+                                        <th class="p-2 border text-center">
+                                            <input type="checkbox" v-model="allSelected" @change="toggleAllPoints">
+                                        </th>
                                         <th class="p-2 border">分组</th>
                                         <th class="p-2 border">设备名</th>
                                         <th class="p-2 border">项目编号</th>
@@ -223,6 +226,9 @@
                                 </thead>
                                 <tbody>
                                     <tr v-for="(row, idx) in pointList" :key="idx" class="border-b">
+                                        <td class="p-1 border text-center">
+                                            <input type="checkbox" :value="idx" v-model="selectedPointIndexes">
+                                        </td>
                                         <td class="p-1 border"><input v-model="row.group_name" class="w-full border rounded p-1"/></td>
                                         <td class="p-1 border"><input v-model="row.device_name" class="w-full border rounded p-1"/></td>
                                         <td class="p-1 border"><input v-model="row.project_no" class="w-full border rounded p-1"/></td>
@@ -304,6 +310,8 @@
                     shipInfo: { name: '', hull: '', owner: '', project: '', class: '', imo: '', mmsi: '' },
                     bulkField: '',
                     bulkValue: '',
+                    selectedPointIndexes: [],
+                    allSelected: false,
                     step4Stage: 1,
                     step4Flow: ['船只信息', '分组列表', '设备列表', '测点信息'],
                     signalOptions: ['Analog', 'Switch'],
@@ -385,16 +393,41 @@
                     const data = await res.json();
                     this.transformResult = data;
                     this.groupList = data.groups || [];
-                    this.deviceList = data.devices || [];
+                    this.deviceList = (data.devices || []).map(d => {
+                        // 确保换行符拆分后的中英文不会丢失
+                        if (d.name_en === d.name_zh && d.name_en.includes('\n')) {
+                            const parts = d.name_en.split('\n');
+                            d.name_en = parts[0].trim();
+                            d.name_zh = parts[1] ? parts[1].trim() : d.name_en;
+                        }
+                        return d;
+                    });
                     this.pointList = data.points || [];
+                    this.selectedPointIndexes = [];
+                    this.allSelected = false;
                     this.step4Stage = 1;
                     this.step = 4;
                 },
                 applyBulk() {
                     if (!this.bulkField || !this.bulkValue) return;
-                    this.pointList.forEach(r => r[this.bulkField] = this.bulkValue);
+                    const targetIdx = this.selectedPointIndexes.length ? this.selectedPointIndexes : this.pointList.map((_, idx) => idx);
+                    targetIdx.forEach(i => {
+                        if (this.pointList[i]) this.pointList[i][this.bulkField] = this.bulkValue;
+                    });
+                },
+                toggleAllPoints() {
+                    if (this.allSelected) {
+                        this.selectedPointIndexes = this.pointList.map((_, idx) => idx);
+                    } else {
+                        this.selectedPointIndexes = [];
+                    }
                 },
                 async exportExcel() {
+                    if (!this.shipInfo.name) {
+                        alert('请先填写船只名称');
+                        this.step4Stage = 1;
+                        return;
+                    }
                     const res = await fetch('/api/export', {
                         method: 'POST', headers: {'Content-Type': 'application/json'},
                         body: JSON.stringify({ points: this.pointList, ship_info: this.shipInfo, groups: this.groupList, devices: this.deviceList })

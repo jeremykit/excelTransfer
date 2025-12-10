@@ -40,24 +40,31 @@ def preview_sheet():
 
 def _infer_types(item):
     """Infer data_type/business_type/signal_type/collect_type when possible."""
-    sig = item.get('signal_type', '') or ''
-    alarm = item.get('alarm_type', '') or ''
-    remark = item.get('collect_type', '') or ''
+    sig = (item.get('signal_type') or '').strip()
+    alarm = (item.get('alarm_type') or '').strip()
+    remark = (item.get('collect_type') or '').strip()
+    name_en = (item.get('name_en') or '').lower()
     normalized = sig.lower()
 
-    if ('analog' in normalized) or ('模拟' in sig):
-        if not item.get('signal_type'):
-            item['signal_type'] = 'Analog'
+    analog_keys = ['analog', 'ai', '4-20', '0-10', '模拟']
+    switch_keys = ['switch', 'digital', 'di', '开关']
+    state_keys = ['status', 'state', '开', '停']
+
+    if any(k in normalized for k in analog_keys):
+        item['signal_type'] = item.get('signal_type') or 'Analog'
         item['data_type'] = item.get('data_type') or 'DOUBLE'
         item['business_type'] = item.get('business_type') or 'DIGITAL'
-    if any(k in normalized for k in ['on', 'off', 'switch']) or ('开关' in sig):
-        if not item.get('signal_type'):
-            item['signal_type'] = 'Switch'
+    if any(k in normalized for k in switch_keys):
+        item['signal_type'] = item.get('signal_type') or 'Switch'
         item['data_type'] = item.get('data_type') or 'DOUBLE'
+        item['business_type'] = item.get('business_type') or 'STATE'
+    if any(k in name_en for k in state_keys):
         item['business_type'] = item.get('business_type') or 'STATE'
     if alarm:
         item['business_type'] = 'ALARM'
     if remark and not item.get('collect_type'):
+        item['collect_type'] = remark
+    if not item.get('collect_type') and any(k in remark.lower() for k in ['opc', 'modbus', 'nmea', 'can', 'io']):
         item['collect_type'] = remark
 
 
@@ -74,7 +81,14 @@ def transform():
 
     try:
         xl = pd.ExcelFile(filepath)
-        sheets_to_use = selected_sheets or ([sheet_name] if sheet_name else xl.sheet_names)
+        # 仅处理用户勾选的 Sheet；未勾选时才回退至单 Sheet
+        if selected_sheets:
+            sheets_to_use = [s for s in selected_sheets if s in xl.sheet_names]
+        else:
+            sheets_to_use = [sheet_name] if sheet_name else xl.sheet_names
+
+        if not sheets_to_use:
+            return jsonify({'error': '未选择需要处理的 Sheet'}), 400
 
         raw_display = []
         clean_rows = []
@@ -108,6 +122,7 @@ def transform():
                 item = {
                     'group_name': s_name,
                     'device_name': raw_item.get('dev', ''),
+                    'device_name_zh': '',
                     'project_no': '',
                     'standard_name': '',
                     'name_en': '',
@@ -143,7 +158,14 @@ def transform():
                             item['name_en'] = val
                             item['name_zh'] = val
                     elif std_key == 'device_group':
-                        item['device_name'] = str(row[col_idx]) if pd.notna(row[col_idx]) else ""
+                        dev_val = str(row[col_idx]) if pd.notna(row[col_idx]) else ""
+                        if '\n' in dev_val:
+                            parts = dev_val.split('\n')
+                            item['device_name'] = parts[0].strip()
+                            item['device_name_zh'] = parts[1].strip() if len(parts) > 1 else ''
+                        else:
+                            item['device_name'] = dev_val
+                            item['device_name_zh'] = dev_val
                     elif std_key == 'item_no':
                         item['project_no'] = str(row[col_idx]) if pd.notna(row[col_idx]) else ""
                     elif std_key == 'signal_type':
@@ -175,7 +197,7 @@ def transform():
                     device_pairs.append(pair)
                     devices.append({
                         'name_en': r['device_name'],
-                        'name_zh': r['device_name'],
+                        'name_zh': r.get('device_name_zh') or r['device_name'],
                         'alias': '',
                         'category': '',
                         'group_name': r['group_name'],
