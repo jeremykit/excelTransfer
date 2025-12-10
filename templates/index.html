@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>点表转换向导 - 索引修复版</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <style>
+        .step-active { @apply border-blue-500 text-blue-600; }
+        .step-inactive { @apply border-gray-200 text-gray-400; }
+        .table-cell { @apply border px-2 py-1 text-xs whitespace-nowrap overflow-hidden text-ellipsis max-w-[150px]; }
+    </style>
+</head>
+<body class="bg-gray-50 h-screen flex flex-col">
+    <div id="app" class="flex flex-col h-full">
+        
+        <header class="bg-white shadow px-6 py-4 z-10">
+            <h1 class="text-xl font-bold text-gray-800">⛴️ 船舶点表交互式转换向导 (Index Mode)</h1>
+            <div class="flex mt-4 space-x-8 text-sm font-medium">
+                <div :class="step >= 1 ? 'text-blue-600' : 'text-gray-400'">1. 上传文件</div>
+                <div :class="step >= 2 ? 'text-blue-600' : 'text-gray-400'">2. 选择 Sheet & 表头</div>
+                <div :class="step >= 3 ? 'text-blue-600' : 'text-gray-400'">3. 建立映射</div>
+                <div :class="step >= 4 ? 'text-blue-600' : 'text-gray-400'">4. 结果对比</div>
+            </div>
+        </header>
+
+        <main class="flex-1 overflow-hidden relative">
+            <!-- Step 1: 上传 -->
+            <div v-if="step === 1" class="flex items-center justify-center h-full">
+                <div class="bg-white p-10 rounded-xl shadow-lg text-center">
+                    <input type="file" @change="uploadFile" class="block w-full text-sm text-slate-500"/>
+                </div>
+            </div>
+
+            <!-- Step 2: 选择表头 -->
+            <div v-if="step === 2" class="flex flex-col h-full p-6">
+                <div class="flex space-x-2 mb-4 overflow-x-auto pb-2">
+                    <button v-for="s in sheets" :key="s" @click="selectSheet(s)"
+                        :class="['px-4 py-2 rounded-lg text-sm', currentSheet === s ? 'bg-blue-600 text-white' : 'bg-white hover:bg-gray-100']">
+                        [[ s ]]
+                    </button>
+                </div>
+                <div class="flex-1 overflow-auto bg-white rounded shadow border relative">
+                    <table class="w-full">
+                        <thead class="sticky top-0 bg-gray-200 z-20">
+                            <tr>
+                                <th class="w-10 text-xs p-1 border">#</th>
+                                <th v-for="n in maxCols" :key="n" class="text-xs p-1 border text-center font-mono text-gray-500">
+                                    [[ getExcelColumnName(n-1) ]]
+                                </th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr v-for="(row, rIdx) in rawPreviewRows" :key="rIdx" @click="selectHeaderRow(rIdx)"
+                                :class="['cursor-pointer hover:bg-blue-50', headerRowIndex === rIdx ? 'bg-blue-100 ring-2 ring-blue-500 z-10 relative' : '']">
+                                <td class="bg-gray-100 text-gray-500 text-xs p-2 text-center font-bold">[[ rIdx + 1 ]]</td>
+                                <td v-for="(cell, cIdx) in row" :key="cIdx" class="table-cell">[[ cell ]]</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="mt-4 text-right">
+                    <button @click="confirmHeader" :disabled="headerRowIndex === null" class="bg-blue-600 text-white px-6 py-2 rounded">下一步</button>
+                </div>
+            </div>
+
+            <!-- Step 3: 映射 (关键修复：value 绑定 colIndex) -->
+            <div v-if="step === 3" class="flex flex-col h-full p-6">
+                <h2 class="text-lg font-bold mb-4">配置字段映射</h2>
+                <div class="bg-white p-6 rounded shadow grid grid-cols-2 gap-8 overflow-auto">
+                    <div class="space-y-4">
+                        <h3 class="font-bold text-gray-700 border-b pb-2">标准模版字段</h3>
+                        
+                        <div v-for="(fieldLabel, fieldKey) in standardFields" :key="fieldKey" class="flex items-center justify-between">
+                            <label class="text-sm font-medium" :class="['device_group','point_name'].includes(fieldKey) ? 'text-red-600': 'text-gray-600'">
+                                [[ fieldLabel ]]
+                            </label>
+                            <!-- 这里的 value 绑定的是 colIndex (0,1,2...)，这才是唯一的！ -->
+                            <select v-model="mapping[fieldKey]" class="border rounded p-2 w-72 text-sm font-mono">
+                                <option :value="null">-- 请选择 --</option>
+                                <option v-for="col in colOptions" :value="col.colIndex">
+                                    [[ col.label ]]
+                                </option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="bg-gray-50 p-4 rounded text-sm text-gray-600">
+                        <p>💡 现在下拉框绑定的是<strong>列索引</strong>，即使列名相同或为空，也不会冲突了。</p>
+                    </div>
+                </div>
+                <div class="mt-4 text-right">
+                    <button @click="startTransform" class="bg-green-600 text-white px-6 py-2 rounded">开始转换</button>
+                </div>
+            </div>
+
+            <!-- Step 4: 对比 -->
+            <div v-if="step === 4" class="flex flex-col h-full p-4 overflow-hidden">
+                <div class="flex h-full gap-4">
+                    <div class="w-1/2 flex flex-col border rounded bg-white shadow">
+                        <div class="p-2 bg-gray-100 border-b font-bold text-gray-600">处理前 (Raw)</div>
+                        <div class="flex-1 overflow-auto">
+                            <table class="w-full text-xs">
+                                <thead class="bg-gray-50 sticky top-0">
+                                    <tr>
+                                        <th class="p-2 text-left bg-gray-200">设备 (原始)</th>
+                                        <th class="p-2 text-left bg-gray-200">测点 (原始)</th>
+                                        <th class="p-2 text-left bg-gray-200">信号</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr v-for="(row, idx) in transformResult.raw_data" :key="idx" class="border-b even:bg-gray-50">
+                                        <td class="p-2 text-gray-400">[[ row.dev ]]</td>
+                                        <td class="p-2 whitespace-pre-wrap">[[ row.pt ]]</td>
+                                        <td class="p-2">[[ row.sig ]]</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <div class="w-1/2 flex flex-col border rounded bg-white shadow ring-2 ring-green-500">
+                        <div class="p-2 bg-green-50 border-b font-bold text-green-800">处理后 (Clean)</div>
+                        <div class="flex-1 overflow-auto">
+                            <table class="w-full text-xs">
+                                <thead class="bg-green-50 sticky top-0">
+                                    <tr>
+                                        <th class="p-2 text-left">设备 (Fill Down)</th>
+                                        <th class="p-2 text-left">英文 (Split)</th>
+                                        <th class="p-2 text-left">中文 (Split)</th>
+                                        <th class="p-2 text-left">信号</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr v-for="(row, idx) in transformResult.clean_data" :key="idx" class="border-b even:bg-green-50">
+                                        <td class="p-2 font-bold text-blue-600">[[ row.device_group ]]</td>
+                                        <td class="p-2">[[ row.name_en ]]</td>
+                                        <td class="p-2 text-gray-600">[[ row.name_zh ]]</td>
+                                        <td class="p-2">[[ row.signal_type ]]</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+                <div class="mt-4 text-center">
+                    <button class="bg-gray-500 text-white px-6 py-2 rounded" @click="step=2">返回</button>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        const { createApp } = Vue
+
+        const app = createApp({
+            data() {
+                return {
+                    step: 1,
+                    sheets: [],
+                    currentSheet: '',
+                    rawPreviewRows: [], 
+                    maxCols: 0,
+                    headerRowIndex: null, 
+                    colOptions: [],
+                    
+                    standardFields: {
+                        device_group: '设备组/名 (Fill Down)',
+                        point_name: '检测点名称 (中英拆分)',
+                        item_no: '项目编号',
+                        signal_type: '信号类型',
+                        range: '量程',
+                        unit: '单位'
+                    },
+                    mapping: {
+                        device_group: null, point_name: null, item_no: null,
+                        signal_type: null, range: null, unit: null
+                    },
+                    transformResult: { raw_data: [], clean_data: [] }
+                }
+            },
+            methods: {
+                getExcelColumnName(n) {
+                    let ordA = 'A'.charCodeAt(0), ordZ = 'Z'.charCodeAt(0), len = ordZ - ordA + 1, s = "";
+                    while(n >= 0) { s = String.fromCharCode(n % len + ordA) + s; n = Math.floor(n / len) - 1; }
+                    return s;
+                },
+                async uploadFile(event) {
+                    const file = event.target.files[0];
+                    if (!file) return;
+                    const fd = new FormData(); fd.append('file', file);
+                    const res = await fetch('/api/upload', { method: 'POST', body: fd });
+                    const data = await res.json();
+                    if (data.sheets) { this.sheets = data.sheets; this.step = 2; this.selectSheet(this.sheets[1]||this.sheets[0]); }
+                },
+                async selectSheet(s) {
+                    this.currentSheet = s; this.headerRowIndex = null;
+                    const res = await fetch('/api/preview_sheet', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ sheet_name: s }) });
+                    const data = await res.json(); this.rawPreviewRows = data.rows; this.maxCols = data.col_count;
+                },
+                selectHeaderRow(i) { this.headerRowIndex = i; },
+                confirmHeader() {
+                    const currentRow = this.rawPreviewRows[this.headerRowIndex];
+                    const prevRow = this.headerRowIndex > 0 ? this.rawPreviewRows[this.headerRowIndex - 1] : null;
+                    
+                    this.colOptions = currentRow.map((cellVal, idx) => {
+                        let labelVal = String(cellVal).trim();
+                        // 智能向上查找合并单元格
+                        if ((!labelVal || labelVal === 'nan') && prevRow) {
+                            const prevVal = String(prevRow[idx]).trim();
+                            if (prevVal && prevVal !== 'nan') labelVal = prevVal + " (上行)";
+                        }
+                        const colLetter = this.getExcelColumnName(idx);
+                        return {
+                            colIndex: idx, // 关键：使用索引作为 value
+                            label: `[${colLetter}] ${labelVal}`
+                        };
+                    });
+                    
+                    // 重置映射
+                    for(let k in this.mapping) this.mapping[k] = null;
+                    this.autoMapColumns();
+                    this.step = 3;
+                },
+                autoMapColumns() {
+                    this.colOptions.forEach(opt => {
+                        const txt = opt.label;
+                        if (txt.includes('设备组') || txt.includes('EQUIPMENT')) this.mapping.device_group = opt.colIndex;
+                        if (txt.includes('检测点') || txt.includes('ITEM NAME')) this.mapping.point_name = opt.colIndex;
+                        if (txt.includes('项目编号') || txt.includes('ITEM NO')) this.mapping.item_no = opt.colIndex;
+                        if (txt.includes('信号') || txt.includes('TYPE')) this.mapping.signal_type = opt.colIndex;
+                        if (txt.includes('范围') || txt.includes('RANGE')) this.mapping.range = opt.colIndex;
+                        if (txt.includes('单位') || txt.includes('UNIT')) this.mapping.unit = opt.colIndex;
+                    });
+                },
+                async startTransform() {
+                    const res = await fetch('/api/transform', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({
+                        sheet_name: this.currentSheet, header_row_index: this.headerRowIndex, mapping: this.mapping
+                    })});
+                    const data = await res.json();
+                    this.transformResult = data;
+                    this.step = 4;
+                }
+            }
+        })
+        app.config.compilerOptions.delimiters = ['[[', ']]']
+        app.mount('#app')
+    </script>
+</body>
+</html>
